@@ -24,6 +24,8 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { WHOP_CHECKOUT_URL } from './PricingModal';
+import { useAuth } from '../../context/AuthContext';
+import { CustomerReviewsSection } from '../reviews/CustomerReviewsSection';
 
 interface LandingPageProps {
   onStartOnboarding: () => void;
@@ -31,6 +33,7 @@ interface LandingPageProps {
   onOpenPricing: () => void;
   onOpenStarterKit: () => void;
   onNavigateTab: (tab: string) => void;
+  onOpenReviewModal?: () => void;
   isAnalyzed: boolean;
 }
 
@@ -40,9 +43,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onOpenPricing,
   onOpenStarterKit,
   onNavigateTab,
+  onOpenReviewModal,
   isAnalyzed
 }) => {
+  const { isAuthenticated, isPaid, openAuthModal, proceedToCheckout } = useAuth();
   const [openFaqIdx, setOpenFaqIdx] = useState<number | null>(0);
+
+  const handlePurchase = () => {
+    if (isAuthenticated) {
+      if (isPaid) {
+        onNavigateTab('dashboard');
+      } else {
+        proceedToCheckout();
+      }
+    } else {
+      openAuthModal('signup', () => {
+        proceedToCheckout();
+      });
+    }
+  };
 
   const faqs = [
     {
@@ -95,15 +114,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         {/* Primary CTAs */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-          <a
-            href={WHOP_CHECKOUT_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full sm:w-auto px-6 py-3.5 text-sm font-extrabold text-slate-950 bg-amber-400 hover:bg-amber-500 rounded-xl shadow-md transition flex items-center justify-center space-x-2 border border-amber-500"
+          <button
+            onClick={handlePurchase}
+            className="w-full sm:w-auto px-6 py-3.5 text-sm font-extrabold text-slate-950 bg-amber-400 hover:bg-amber-500 rounded-xl shadow-md transition flex items-center justify-center space-x-2 border border-amber-500 cursor-pointer"
           >
             <span>Get JOBHUNT AI — $14.99</span>
             <ExternalLink className="w-4 h-4" />
-          </a>
+          </button>
 
           <button
             onClick={onStartOnboarding}
@@ -554,15 +571,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             <div className="space-y-2 pt-4 border-t border-slate-100">
-              <a
-                href={WHOP_CHECKOUT_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-3.5 text-xs sm:text-sm font-extrabold text-slate-950 bg-amber-400 hover:bg-amber-500 rounded-xl shadow-md transition flex items-center justify-center space-x-2 border border-amber-500"
+              <button
+                onClick={handlePurchase}
+                className="w-full py-3.5 text-xs sm:text-sm font-extrabold text-slate-950 bg-amber-400 hover:bg-amber-500 rounded-xl shadow-md transition flex items-center justify-center space-x-2 border border-amber-500 cursor-pointer"
               >
                 <span>Get Full Access — $14.99</span>
                 <ExternalLink className="w-4 h-4" />
-              </a>
+              </button>
 
               <button
                 onClick={onStartOnboarding}
@@ -576,7 +591,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
       </section>
 
-      {/* 7. FAQ SECTION */}
+      {/* 7. CUSTOMER REVIEWS SECTION */}
+      <CustomerReviewsSection onOpenReviewModal={onOpenReviewModal} isPaid={isPaid} />
+
+      {/* 8. FAQ SECTION */}
       <section className="max-w-4xl mx-auto px-4 space-y-6">
         <div className="text-center space-y-2">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Common Questions</span>
@@ -611,7 +629,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
       </section>
 
-      {/* 8. BOTTOM CALL TO ACTION */}
+      {/* 9. BOTTOM CALL TO ACTION */}
       <section className="bg-gradient-to-r from-brand-600 to-indigo-700 text-white rounded-3xl p-8 sm:p-12 text-center max-w-5xl mx-auto space-y-6 shadow-elevated">
         <h2 className="text-2xl sm:text-4xl font-extrabold">
           Ready to Build a Verifiable, High-Impact Application?
@@ -621,15 +639,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-          <a
-            href={WHOP_CHECKOUT_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full sm:w-auto px-6 py-3.5 text-xs sm:text-sm font-extrabold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-xl shadow transition flex items-center justify-center space-x-2 border border-amber-400"
+          <button
+            onClick={handlePurchase}
+            className="w-full sm:w-auto px-6 py-3.5 text-xs sm:text-sm font-extrabold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-xl shadow transition flex items-center justify-center space-x-2 border border-amber-400 cursor-pointer"
           >
             <span>Get Full Access — $14.99</span>
             <ExternalLink className="w-4 h-4" />
-          </a>
+          </button>
           <button
             onClick={onStartOnboarding}
             className="w-full sm:w-auto px-5 py-3.5 text-xs sm:text-sm font-bold text-white bg-brand-800/80 hover:bg-brand-900 border border-white/20 rounded-xl transition"

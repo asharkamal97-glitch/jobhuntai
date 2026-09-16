@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+﻿import React, { useState, useRef } from 'react';
 import { 
   Briefcase, 
   ShieldCheck, 
@@ -17,9 +17,13 @@ import {
   HelpCircle,
   Lock,
   X,
-  ChevronRight
+  ChevronRight,
+  User as UserIcon,
+  LogOut,
+  LayoutDashboard
 } from 'lucide-react';
 import { LinkedInIcon } from '../icons/LinkedInIcon';
+import { useAuth } from '../../context/AuthContext';
 
 interface NavbarProps {
   currentTab: string;
@@ -44,6 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLoadDemo,
   isFullAccess = false
 }) => {
+  const { user, isAuthenticated, isPaid, openAuthModal, logout, proceedToCheckout } = useAuth();
   const [lockedNotice, setLockedNotice] = useState<{ title: string; reason: string } | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -76,6 +81,22 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
+  const handlePurchaseClick = () => {
+    if (isAuthenticated) {
+      if (isPaid) {
+        setCurrentTab('dashboard');
+      } else {
+        proceedToCheckout();
+      }
+    } else {
+      openAuthModal('signup', () => {
+        proceedToCheckout();
+      });
+    }
+  };
+
+  const effectiveFullAccess = isFullAccess || isPaid;
+
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200">
       {/* Top utility bar */}
@@ -98,6 +119,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Quick Action Buttons */}
           <div className="flex items-center space-x-2 sm:space-x-3">
+            
+            {/* Demo / Mode indicator */}
             {!isAnalyzed ? (
               <button
                 onClick={onLoadDemo}
@@ -114,42 +137,69 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             )}
 
+            {/* New Job Analysis */}
             <button
               onClick={onOpenOnboarding}
               className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-sm transition"
             >
-              <span>New Job Analysis</span>
+              <span>New Analysis</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
 
-            <button
-              onClick={onOpenStarterKit}
-              className="inline-flex items-center space-x-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
-              title="Downloadable Starter Kit"
-            >
-              <DownloadCloud className="w-4 h-4 text-brand-500" />
-              <span className="hidden sm:inline">Starter Kit</span>
-            </button>
-
             {/* Get Full Access $14.99 Button */}
-            {isFullAccess ? (
+            {effectiveFullAccess ? (
               <button
-                onClick={onOpenPricing}
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-lg transition border border-amber-300 shadow-subtle"
-                title="Full Access Active (Lifetime)"
+                onClick={() => setCurrentTab('dashboard')}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition border border-emerald-300 shadow-subtle"
+                title="Full Access Active"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Full Access</span>
               </button>
             ) : (
               <button
-                onClick={onOpenPricing}
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-500 rounded-lg shadow-sm transition border border-amber-500/80"
-                title="Get Full JOBHUNT AI Access ($14.99)"
+                onClick={handlePurchaseClick}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-500 rounded-lg shadow-sm transition border border-amber-500/80"
+                title="Get JOBHUNT AI ($14.99)"
               >
-                <Sparkles className="w-3.5 h-3.5 text-slate-900" />
-                <span>Get Full Access — $14.99</span>
+                <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                <span className="hidden sm:inline">Get JOBHUNT AI — $14.99</span>
+                <span className="sm:hidden">$14.99</span>
               </button>
+            )}
+
+            {/* Auth / Profile Pill */}
+            {isAuthenticated ? (
+              <div className="flex items-center space-x-1.5 pl-1 border-l border-slate-200">
+                <button
+                  onClick={() => setCurrentTab('dashboard')}
+                  className={`inline-flex items-center space-x-1 px-2.5 py-1.5 text-xs font-bold rounded-lg transition ${
+                    currentTab === 'dashboard'
+                      ? 'bg-brand-50 text-brand-700 border border-brand-200'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                  title={`Logged in as ${user?.email}`}
+                >
+                  <LayoutDashboard className="w-3.5 h-3.5 text-brand-600" />
+                  <span className="hidden md:inline">{user?.name || user?.email?.split('@')[0]}</span>
+                </button>
+                <button
+                  onClick={() => logout()}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                  title="Log Out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center space-x-1 pl-1 border-l border-slate-200">
+                <button
+                  onClick={() => openAuthModal('login')}
+                  className="px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-950 hover:bg-slate-100 rounded-lg transition"
+                >
+                  Log In
+                </button>
+              </div>
             )}
 
             <button
@@ -197,7 +247,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Workflow Navigation Tabs with Mobile Scroll Cues */}
       <div className="relative border-t border-slate-100 bg-slate-50/70 overflow-hidden">
         
-        {/* Mobile Horizontal Scroll Indicator Fades */}
         <div className="absolute left-0 top-0 bottom-0 w-5 bg-gradient-to-r from-slate-100/90 to-transparent pointer-events-none sm:hidden z-10" />
         <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-slate-200/90 to-transparent pointer-events-none sm:hidden z-10" />
 
@@ -218,6 +267,23 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <span>Overview</span>
           </button>
+
+          {isAuthenticated && (
+            <button
+              onClick={() => {
+                setLockedNotice(null);
+                setCurrentTab('dashboard');
+              }}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap transition flex items-center space-x-1.5 ${
+                currentTab === 'dashboard' 
+                  ? 'bg-white text-brand-700 shadow-sm border border-slate-200 font-semibold' 
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+              }`}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5 text-brand-600" />
+              <span>Dashboard</span>
+            </button>
+          )}
 
           {mainNavItems.map(item => {
             const Icon = item.icon;

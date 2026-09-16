@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { LandingPage } from './components/landing/LandingPage';
 import { PricingModal } from './components/landing/PricingModal';
+import { AuthModal } from './components/auth/AuthModal';
+import { DashboardView } from './components/dashboard/DashboardView';
+import { ReviewModal } from './components/reviews/ReviewModal';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 import { ApplicationBlueprint } from './components/blueprint/ApplicationBlueprint';
 import { RequirementEvidenceEngine } from './components/evidence/RequirementEvidenceEngine';
@@ -55,7 +59,22 @@ import {
   resetAnalysesCount
 } from './services/entitlement';
 
-export function App() {
+import { api } from './services/apiClient';
+import { Sparkles, X } from 'lucide-react';
+
+function syncTailoredResumeText(originalResumeText: string, bulletChanges: BulletChange[]): string {
+  let synced = originalResumeText;
+  bulletChanges.forEach(b => {
+    const textToUse = b.status === 'approved' ? (b.customDraft || b.proposed) : b.original;
+    if (b.original && synced.includes(b.original)) {
+      synced = synced.replace(b.original, textToUse);
+    }
+  });
+  return synced;
+}
+
+function MainAppContent() {
+  const { user, isAuthenticated, isPaid, refreshEntitlement } = useAuth();
   const [currentTab, setCurrentTab] = useState<string>('landing');
   
   // Application State — clean empty state by default for new users
@@ -76,11 +95,18 @@ export function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Pro status from entitlement service
-  const [isPro, setIsPro] = useState<boolean>(() => isFullAccess());
+  // Pro status from entitlement service & live AuthContext
+  const [localPro, setLocalPro] = useState<boolean>(() => isFullAccess());
+  const effectivePro = isPaid || localPro;
 
-  // Modals & Pricing Config
+  // Modals & Config
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [paymentSuccessNotice, setPaymentSuccessNotice] = useState<{
+    show: boolean;
+    orderId?: string;
+  }>({ show: false });
+
   const [pricingConfig, setPricingConfig] = useState<{
     isOpen: boolean;
     featureName?: string;
@@ -91,7 +117,28 @@ export function App() {
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Helper to open pricing modal with contextual details
+  // Check URL query parameters for payment return (?payment=success, ?order_id=...)
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const isPaymentSuccess = urlParams.get('payment') === 'success' || urlParams.get('checkout') === 'success';
+      const orderId = urlParams.get('order_id') || urlParams.get('whop_order_id') || urlParams.get('payment_id');
+
+      if (isPaymentSuccess || orderId) {
+        setPaymentSuccessNotice({ show: true, orderId: orderId || undefined });
+        if (orderId) {
+          api.verifyPayment(orderId, user?.email).then(() => {
+            refreshEntitlement();
+          }).catch(console.warn);
+        }
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    } catch {
+      // Browser navigation fallback
+    }
+  }, [user, refreshEntitlement]);
+
   const handleOpenPricing = (featureName?: string, headline?: string, reason?: string) => {
     setPricingConfig({
       isOpen: true,
@@ -102,7 +149,7 @@ export function App() {
   };
 
   const handleStartOnboarding = () => {
-    if (!canPerformNewAnalysis()) {
+    if (!effectivePro && !canPerformNewAnalysis()) {
       handleOpenPricing(
         'Unlimited Job Analyses',
         "You've completed your free job analysis",
@@ -127,8 +174,8 @@ export function App() {
   }, [trackedApplications]);
 
   useEffect(() => {
-    localStorage.setItem('jobhunt_ai_is_pro', String(isPro));
-  }, [isPro]);
+    localStorage.setItem('jobhunt_ai_is_pro', String(effectivePro));
+  }, [effectivePro]);
 
   // Handle New Job Analysis from Onboarding
   const handleOnboardingSubmit = (data: {
@@ -141,10 +188,10 @@ export function App() {
     linkedinProfileText?: string;
     additionalNotes?: string;
   }) => {
-    // Record analysis count
-    incrementAnalysesCount();
+    if (!effectivePro) {
+      incrementAnalysesCount();
+    }
 
-    // Run AI Engine pipeline
     const xray = parseJobDescription(data.jobDescription, data.jobTitle, data.company);
     const reqs = matchRequirementsToEvidence(xray, data.rawResumeText, evidenceBank);
     const score = calculateReadinessScore(reqs, data.rawResumeText, data.jobDescription);
@@ -169,85 +216,56 @@ export function App() {
       requirements: reqs,
       bulletChanges: bulletProposals,
       claimGuardItems: claimGuard,
-      atsChecks,
+      atsChecks: atsChecks,
       interviewQuestions: interviewQs,
       applicationPack: appPack
     };
 
     setAppState(newState);
-
-    // Auto-add to tracker
-    const newTrackEntry: JobTrackerEntry = {
-      id: `track-${Date.now()}`,
-      company: data.company,
-      role: data.jobTitle,
-      jobUrl: data.jobUrl,
-      dateSaved: new Date().toISOString().slice(0, 10),
-      status: 'Preparing',
-      resumeVersion: 'v1.0 (In-Progress)',
-      notes: `Target Goal: ${data.targetGoal}. Initial Alignment: ${score.overallScore}%`,
-      matchScore: score.overallScore
-    };
-    setTrackedApplications(prev => [newTrackEntry, ...prev]);
-
-    // Navigate to Blueprint
+    setIsOnboardingOpen(false);
     setCurrentTab('blueprint');
   };
 
-  // Reset to Demo
+  // Load Demo Data for Trial
   const handleLoadDemo = () => {
     setAppState(DEMO_APPLICATION_STATE);
     setEvidenceBank(INITIAL_EVIDENCE_BANK);
     setTrackedApplications(INITIAL_TRACKED_APPLICATIONS);
+    setIsOnboardingOpen(false);
     setCurrentTab('blueprint');
   };
 
-  // Clear all workspace data (Start Blank)
+  // Clear user data
   const handleClearData = () => {
-    localStorage.removeItem('jobhunt_ai_app_state');
-    localStorage.removeItem('jobhunt_ai_evidence_bank');
-    localStorage.removeItem('jobhunt_ai_tracked_apps');
-    resetAnalysesCount();
     setAppState(EMPTY_APPLICATION_STATE);
     setEvidenceBank([]);
     setTrackedApplications([]);
-    setCurrentTab('blueprint');
+    resetAnalysesCount();
+    setCurrentTab('landing');
   };
 
-  // Requirement Matrix Updates
-  const handleUpdateRequirement = (updatedReq: JobRequirement) => {
-    const updatedReqs = appState.requirements.map(r => r.id === updatedReq.id ? updatedReq : r);
+  // Requirement Matrix updates
+  const handleUpdateRequirement = (updated: JobRequirement) => {
+    const updatedReqs = appState.requirements.map(r => r.id === updated.id ? updated : r);
     const newScore = calculateReadinessScore(updatedReqs, appState.rawResumeText, appState.jobDescription);
+    const newPack = generateApplicationPack(appState.jobTitle, appState.company, appState.rawResumeText, updatedReqs, appState.jobXRay);
+    
     setAppState(prev => ({
       ...prev,
       requirements: updatedReqs,
-      readinessScore: newScore
+      readinessScore: newScore,
+      applicationPack: newPack
     }));
   };
 
-  // Resume Tailor Bullet Updates
-  const syncTailoredResumeText = (originalText: string, changes: BulletChange[]): string => {
-    let text = originalText;
-    changes.forEach(change => {
-      if (change.status === 'approved') {
-        const targetText = change.customDraft || change.proposed;
-        if (text.includes(change.original)) {
-          text = text.replace(change.original, targetText);
-        }
-      }
-    });
-    return text;
-  };
-
-  const handleUpdateBulletChange = (updatedChange: BulletChange) => {
-    const updatedChanges = appState.bulletChanges.map(c => c.id === updatedChange.id ? updatedChange : c);
-    const newClaimAudit = runClaimGuardAudit(updatedChanges, appState.rawResumeText, evidenceBank);
-    const syncedResume = syncTailoredResumeText(appState.rawResumeText, updatedChanges);
-
+  // Bullet change status updates
+  const handleUpdateBulletChange = (updated: BulletChange) => {
+    const updatedBullets = appState.bulletChanges.map(b => b.id === updated.id ? updated : b);
+    const syncedResume = syncTailoredResumeText(appState.rawResumeText, updatedBullets);
+    
     setAppState(prev => ({
       ...prev,
-      bulletChanges: updatedChanges,
-      claimGuardItems: newClaimAudit,
+      bulletChanges: updatedBullets,
       applicationPack: {
         ...prev.applicationPack,
         tailoredResume: syncedResume
@@ -256,12 +274,15 @@ export function App() {
   };
 
   const handleApproveAllBullets = () => {
-    const approved = appState.bulletChanges.map(c => ({ ...c, status: 'approved' as const }));
-    const syncedResume = syncTailoredResumeText(appState.rawResumeText, approved);
-
+    const updatedBullets = appState.bulletChanges.map(b => ({
+      ...b,
+      status: 'approved' as const
+    }));
+    const syncedResume = syncTailoredResumeText(appState.rawResumeText, updatedBullets);
+    
     setAppState(prev => ({
       ...prev,
-      bulletChanges: approved,
+      bulletChanges: updatedBullets,
       applicationPack: {
         ...prev.applicationPack,
         tailoredResume: syncedResume
@@ -269,7 +290,6 @@ export function App() {
     }));
   };
 
-  // Claim Guard Resolutions
   const handleResolveClaimItem = (
     itemId: string, 
     resolution: 'add_evidence' | 'remove_number' | 'keep_original', 
@@ -371,6 +391,42 @@ export function App() {
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col font-sans">
       
+      {/* Payment Success Banner */}
+      {paymentSuccessNotice.show && (
+        <div className="bg-emerald-600 text-white px-4 py-3 shadow-md animate-in slide-in-from-top duration-200">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center space-x-2.5">
+              <Sparkles className="w-5 h-5 text-amber-300 animate-bounce" />
+              <div className="text-xs sm:text-sm font-bold">
+                Payment successful 🎉 Your JOBHUNT AI Full Access is ready!
+                {paymentSuccessNotice.orderId && (
+                  <span className="ml-2 font-mono text-emerald-100 text-[11px]">
+                    (Order: {paymentSuccessNotice.orderId})
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => {
+                  setPaymentSuccessNotice({ show: false });
+                  setCurrentTab('dashboard');
+                }}
+                className="px-3 py-1 bg-white text-emerald-800 text-xs font-extrabold rounded-lg hover:bg-emerald-50 transition"
+              >
+                OPEN JOBHUNT AI
+              </button>
+              <button
+                onClick={() => setPaymentSuccessNotice({ show: false })}
+                className="p-1 hover:bg-emerald-700 rounded transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
@@ -381,7 +437,7 @@ export function App() {
         onOpenStarterKit={() => setCurrentTab('starterkit')}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onLoadDemo={handleLoadDemo}
-        isFullAccess={isPro}
+        isFullAccess={effectivePro}
       />
 
       {/* Main Workspace Body */}
@@ -394,6 +450,18 @@ export function App() {
             onOpenPricing={() => handleOpenPricing()}
             onOpenStarterKit={() => setCurrentTab('starterkit')}
             onNavigateTab={setCurrentTab}
+            onOpenReviewModal={() => setIsReviewModalOpen(true)}
+            isAnalyzed={appState.isAnalyzed}
+          />
+        )}
+
+        {currentTab === 'dashboard' && (
+          <DashboardView
+            onNavigateTab={setCurrentTab}
+            onStartOnboarding={handleStartOnboarding}
+            onLoadDemo={handleLoadDemo}
+            onOpenPricing={() => handleOpenPricing()}
+            onOpenReviewModal={() => setIsReviewModalOpen(true)}
             isAnalyzed={appState.isAnalyzed}
           />
         )}
@@ -432,7 +500,7 @@ export function App() {
             onNavigateTab={setCurrentTab}
             candidateName={appState.company ? 'Alex Morgan' : 'Candidate'}
             targetJobTitle={appState.jobTitle}
-            isFullAccess={isPro}
+            isFullAccess={effectivePro}
             onOpenPricing={handleOpenPricing}
           />
         )}
@@ -467,7 +535,7 @@ export function App() {
             candidateName="Alex Morgan"
             onUpdateAppPack={(updated) => setAppState(prev => ({ ...prev, applicationPack: updated }))}
             onNavigateTab={setCurrentTab}
-            isFullAccess={isPro}
+            isFullAccess={effectivePro}
             onOpenPricing={handleOpenPricing}
           />
         )}
@@ -513,7 +581,7 @@ export function App() {
 
         {currentTab === 'starterkit' && (
           <StarterKitViewer 
-            isFullAccess={isPro}
+            isFullAccess={effectivePro}
             onOpenPricing={handleOpenPricing}
           />
         )}
@@ -521,6 +589,13 @@ export function App() {
       </main>
 
       {/* Modals */}
+      <AuthModal />
+
+      <ReviewModal
+        isOpen={isReviewModalOpen}
+        onClose={() => setIsReviewModalOpen(false)}
+      />
+
       <OnboardingWizard
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}
@@ -531,8 +606,8 @@ export function App() {
       <PricingModal
         isOpen={pricingConfig.isOpen}
         onClose={() => setPricingConfig(prev => ({ ...prev, isOpen: false }))}
-        onUpgradeSuccess={() => setIsPro(true)}
-        isPro={isPro}
+        onUpgradeSuccess={() => setLocalPro(true)}
+        isPro={effectivePro}
         featureName={pricingConfig.featureName}
         headline={pricingConfig.headline}
         reason={pricingConfig.reason}
@@ -543,7 +618,7 @@ export function App() {
         onClose={() => setIsSettingsOpen(false)}
         onResetToDemo={handleLoadDemo}
         onClearData={handleClearData}
-        onEntitlementChange={() => setIsPro(isFullAccess())}
+        onEntitlementChange={() => setLocalPro(isFullAccess())}
       />
 
       {/* Footer */}
@@ -554,6 +629,14 @@ export function App() {
       />
 
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <AuthProvider>
+      <MainAppContent />
+    </AuthProvider>
   );
 }
 
